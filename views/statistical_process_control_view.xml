@@ -269,7 +269,20 @@
         <field name="arch" type="xml">
             <form string="Statistical Process Control">
                 <header>
-                    <!-- You can add state and buttons here if needed -->
+                    <field name="stage" widget="statusbar" statusbar_visible="draft,in_progress,to_approve,approved,completed" statusbar_colors='{"canceled": "warning" , "draft": #199cff , "in_progress": "info", "to_approve":"warning", "approved":"green", "completed":"green"}' options="{'clickable': True}"/>
+                    <button name="action_start" string="Start" type="object" class="btn-primary" attrs="{'invisible': [('stage', '!=', 'draft')]}" confirm="Are you sure you want to start the process?" />
+                    <button name="action_send_for_approval" string="Send for Approval" type="object" class="btn-primary" attrs="{'invisible': [('stage', '!=', 'in_progress')]}" confirm="Send for approval?" />
+                    <button name="action_approve" string="Approve" type="object" class="btn-success" attrs="{'invisible': ['|', ('stage', '!=', 'to_approve'), ('can_approve', '=', False)]}" confirm="Approve your part?" />
+                    <button name="action_reject" string="Reject" type="object" class="btn-danger" attrs="{'invisible': ['|', ('stage', '!=', 'to_approve'), ('can_approve', '=', False)]}" confirm="Reject and return to In Progress?" />
+                    <button name="action_complete" string="Complete" type="object" class="btn-primary"
+                        attrs="{'invisible': ['|', ('stage', '!=', 'approved'), ('is_manager', '=', False)]}"
+                        confirm="Complete the process?" />
+                    <button name="action_cancel" string="Cancel" type="object" class="btn-danger"
+                        attrs="{'invisible': ['|', ('stage', 'in', ('completed', 'canceled')), ('is_manager', '=', False)]}"
+                        confirm="Cancel the process?" />
+                    <button name="action_undo" string="Undo" type="object" class="btn-secondary" 
+                        attrs="{'invisible': ['|', ('stage', 'not in', ['to_approve', 'approved']), ('is_manager', '=', False)]}" 
+                        confirm="Are you sure you want to undo to In Progress?" />
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -279,9 +292,12 @@
                     </div>
                     <group>
                         <group>
+                            <field name="manager" required="1"/>
+                            <field name="is_manager" invisible="1"/>
+                            <field name="approval_members" widget="many2many_tags" required="1"/>
                             <field name="date"/>
-                            <field name="product_id"/>
-                            <field name="product_qty"/>
+                            <!-- <field name="product_id"/> -->
+                            <field name="product_qty" invisible="1"/>
                             <field name="part_no_id"/>
                             <field name="part_name"/>
                             <field name="least_count" string="Least Count (L.C.)" help="Measurement precision - enter manually" required="1"/>
@@ -293,8 +309,12 @@
                             <field name="supplier_id"/>
                             <field name="doc_control_no"/>
                             <field name="sampling_ratio"/>
+                            <field name="can_approve" invisible="1" />
+                            <field name="statistics_calculated" invisible="1"/>
+                            <field name="show_calculate_button" invisible="1"/>
                         </group>
                     </group>
+                    
                     <group string="Specification Limits">
                     <div class="oe_grey" style="padding: 10px;">Set USL (Upper Specification Limit) and LSL (Lower Specification Limit)</div>
                         <group>
@@ -309,6 +329,16 @@
                         <field name="data_collection"/>
                     </group>
                     <notebook>
+                        <page name="approval_status" string="Approval Status" groups="spc.group_spc_approver" attrs="{'invisible': [('stage', '!=', 'to_approve')]}" >
+                            <group string="Approval Status">
+                                <field name="approval_line_ids" readonly="1">
+                                    <tree>
+                                        <field name="user_id"/>
+                                        <field name="state" readonly="1"/>
+                                    </tree>
+                                </field>
+                            </group>
+                        </page>
                         <page string="Measurement Parameters" name="measurement_parameter">
                             <p class="oe_grey">First, define your measurement parameters (X1, X2, X3, etc.)</p>
                             <field name="parameter_ids">
@@ -328,10 +358,10 @@
                             </field>
                         </page>
                         <!-- Measurement Matrix Tab -->
-                        <page string="Measurement Matrix" name="measurement_matrix" attrs="{'invisible': [('parameter_ids', '=', []), ('measurement_group_ids', '=', [])]}">
+                        <page string="Measurement Matrix" name="measurement_matrix" attrs="{'invisible': ['|', '|', ('stage', 'in', ('draft', 'completed')), ('parameter_ids', '=', []), ('measurement_group_ids', '=', [])]}">
                             <field name="id" invisible="1"/>
                             <field name="measurement_value_ids" invisible="1"/>
-                            <div class="o_spc_matrix_excel" style="padding: 5px; background: #fff; border: 1px solid #dcdcdc;">
+                            <div class="o_spc_matrix_excel" style="padding: 5px; background: #fff; border: 1px solid #dcdcdc; background-color: #AFEEEE;">
                                 <p class="oe_grey mb-3">
                                     The matrix below shows parameters as rows and groups as columns. Click on any cell to enter or edit measurement values.
                                 </p>
@@ -346,16 +376,16 @@
                             <div attrs="{'invisible': ['|', ('parameter_ids', '=', []), ('measurement_group_ids', '=', [])]}">
                                 <p class="oe_grey">Add measurement values for each parameter and group.</p>
                                 <field name="measurement_value_ids">
-                                    <tree editable="bottom">
-                                        <field name="parameter_id" domain="[('spc_id', '=', parent.id)]"/>
-                                        <field name="group_id" domain="[('spc_id', '=', parent.id)]"/>
+                                    <tree editable="bottom" delete="0">
+                                        <field name="parameter_id" domain="[('spc_id', '=', parent.id)]" readonly="1"/>
+                                        <field name="group_id" domain="[('spc_id', '=', parent.id)]" readonly="1"/>
                                         <field name="value" 
                                             decoration-danger="value &gt; parent.usl or value &lt; parent.lsl"
                                             decoration-success="value &gt;= parent.lsl and value &lt;= parent.usl" />
                                     </tree>
                                 </field>
                             </div>
-                            <div class="o_spc_matrix_excel" style="padding: 10px; background: #fff; border: 1px solid #dcdcdc;">
+                            <div class="o_spc_matrix_excel" style="padding: 10px; background: #fff; border: 1px solid #dcdcdc; background-color: #AFEEEE;">
                                 <p class="oe_grey mb-3">
                                     The matrix below shows parameters as rows and groups as columns. Click on any cell to enter or edit measurement values.
                                 </p>
@@ -370,23 +400,24 @@
                                 <p class="oe_grey">Please define both parameters and groups first, then you can add measurement values.</p>
                             </div>
                         </page>
-                        <page string="Group Statistics" name="group_statistics">
-                            <group>
-                                <group>
-                                <field name="statistics_calculated" invisible="1"/>
-                                <button name="action_calculate_statistics" 
-                                        string="Calculate Statistics" 
-                                        type="object" 
-                                        class="oe_highlight"/>
-                                </group>
-                                <group attrs="{'invisible': [('statistics_calculated', '=', False)]}" >
-                                    <button name="action_view_statistics_pivot"
-                                            string="View Statistics Pivot"
-                                            type="object"
-                                            class="oe_stat_button"
-                                            icon="fa-bar-chart"/>
-                                </group>
-                            </group>
+                        <page string="Group Statistics" name="group_statistics" attrs="{'invisible': ['|', '|', ('stage', 'in', ('draft', 'completed')), ('parameter_ids', '=', []), ('measurement_group_ids', '=', [])]}">
+                                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                    <div style="font-weight: bold; text-align: center; border: 1px solid lightblue; padding: 5px; background-color: #87CEFA;">
+                                        <button name="action_calculate_statistics" 
+                                                string="Calculate Statistics" 
+                                                type="object" 
+                                                class="oe_stat_button"
+                                                />
+                                    </div>
+                                    <div attrs="{'invisible': [('statistics_calculated', '=', False)]}"  style="font-weight: bold; text-align: center; border: 1px solid lightblue; padding: 5px; background-color: #7FFFD4;">
+                                        <button name="action_view_statistics_pivot"
+                                                string="View Statistics Pivot"
+                                                type="object"
+                                                class="oe_stat_button"
+                                                attrs="{'invisible': [('statistics_calculated', '=', False)]}"
+                                                icon="fa-bar-chart"/>
+                                    </div>
+                                </div>
                             <field name="group_stat_ids" readonly="1">
                                 <tree create="0" delete="0" >
                                     <field name="group_id"/>
@@ -395,7 +426,7 @@
                                 </tree>
                             </field>
                         </page>
-                        <page string="Summary Statistics" name="summary_statistics" attrs="{'invisible': [('statistics_calculated', '=', False)]}" >
+                        <page string="Summary Statistics" name="summary_statistics" attrs="{'invisible': ['|', ('stage', 'in', ('draft', 'completed')), ('statistics_calculated', '=', False)]}" >
                             <!-- Basic Statistics Summary -->
                             <group string="Basic Statistics Summary" style="width: 100%;" attrs="{'invisible': [('statistics_calculated', '=', False)]}">
                                 <group style="padding: 10px; width: 50%; background: #f9f9f9; border: 1px solid #dcdcdc;">
@@ -413,6 +444,16 @@
                                 </group>
                             </group>
                             <br/>
+                            <div attrs="{'invisible': [('show_calculate_button', '=', False)]}"  style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div attrs="{'invisible': [('show_calculate_button', '=', False)]}" style="font-weight: bold; text-align: center; border: 1px solid lightblue; padding: 5px; background-color: #F0FFF0;">
+                                    <button name="action_calculate_interval_c" 
+                                        type="object" 
+                                        string="Calculate Interval (C) Manually" 
+                                        class="oe_stat_button" 
+                                        attrs="{'invisible': [('show_calculate_button', '=', False)]}"
+                                        />
+                                </div>
+                            </div>
                             <!-- Advanced Statistics -->
                             <group string="Advanced Process Statistics" style="width: 100%; margin-top: 20px;">
                                 <group>
@@ -477,15 +518,17 @@
                                 </div>
                             </div>
                         </page>
-                        <page string="Summary Statistics (2)" name="summary_statistics_2" attrs="{'invisible': [('statistics_calculated', '=', False)]}" >
+                        <page string="Summary Statistics (2)" name="summary_statistics_2" attrs="{'invisible': ['|', ('stage', 'in', ('draft', 'completed')), ('statistics_calculated', '=', False)]}" >
                             <group>
+                                <div  attrs="{'invisible': [('interval_ids', '!=', [])]}" style="display: inline-block; font-weight: bold; text-align: center; border: 1px solid lightblue; padding: 5px; background-color: #FFDAB9;">
                                     <button name="initialize_intervals" 
                                             string="Initialize Intervals" 
                                             type="object" 
-                                            class="oe_highlight" 
+                                            class="oe_stat_button" 
                                             attrs="{'invisible': [('interval_ids', '!=', [])]}"/>
+                                </div>
                             </group>
-                            <div name="interval_distribution" class="alert alert-info" role="alert" style="width: 100%; display: flex; justify-content: space-between;" >
+                            <div name="interval_distribution" class="alert alert-info" role="alert" style="width: 100%; display: flex; justify-content: space-between; background-color: #87CEFA" >
                                 <div name="interval_distribution" style="width: 48%;" >
                                     <field name="interval_ids" nolabel="1">
                                         <tree editable="bottom">
@@ -504,7 +547,7 @@
                                     </field>
                                 </div>
                             </div>
-                            <div name="control_limits_capability" class="alert alert-info" role="alert" style="width: 100%; margin-top: 20px;">
+                            <div name="control_limits_capability" class="alert alert-info" role="alert" style="width: 100%; margin-top: 20px; background-color: #87CEFA">
                                 <h4>Control Limits and Process Capability</h4>
                                 <div style="display: flex; justify-content: space-between;">
                                     <div style="width: 48%;">
@@ -532,18 +575,18 @@
                                     <div style="display: flex; justify-content: space-between;">
                                         <div style="width: 48%;">
                                             <ul>
-                                                <li><strong>U.C.L.X:</strong> X̄ + A2×R̄ = avg_of_avgs + (A2 × avg_range)</li>
-                                                <li><strong>L.C.L.X:</strong> X̄ - A2×R̄ = avg_of_avgs - (A2 × avg_range)</li>
-                                                <li><strong>U.C.L.R:</strong> R̄ × D4 = avg_range × D4</li>
-                                                <li><strong>L.C.L.R:</strong> R̄ × D3 = avg_range × D3</li>
+                                                <li><strong>U.C.L.X:</strong> X̄ + A2×R̄ = Average of Averages + (A2 × Average Range)</li>
+                                                <li><strong>L.C.L.X:</strong> X̄ - A2×R̄ = Average of Averages - (A2 × Average Range)</li>
+                                                <li><strong>U.C.L.R:</strong> R̄ × D4 = Average Range × D4</li>
+                                                <li><strong>L.C.L.R:</strong> R̄ × D3 = Average Range × D3</li>
                                             </ul>
                                         </div>
                                         <div style="width: 48%;">
                                             <ul>
-                                                <li><strong>Std.Dev.(σ):</strong> R̄ / d2 = avg_range / d2</li>
-                                                <li><strong>Cp:</strong> (USL-LSL)/(6σ) = specification_width / (6 × std_dev)</li>
-                                                <li><strong>Cpk U:</strong> (USL-X̄)/(3σ) = (usl - avg_of_avgs) / (3 × std_dev)</li>
-                                                <li><strong>Cpk L:</strong> (X̄-LSL)/(3σ) = (avg_of_avgs - lsl) / (3 × std_dev)</li>
+                                                <li><strong>Std.Dev.(σ):</strong> R̄ / d2 = Average Range / d2</li>
+                                                <li><strong>Cp:</strong> (USL-LSL)/(6σ) = specification_width / (6 × Std.Dev.(σ))</li>
+                                                <li><strong>Cpk U:</strong> (USL-X̄)/(3σ) = (usl - Average of Averages) / (3 × Std.Dev.(σ))</li>
+                                                <li><strong>Cpk L:</strong> (X̄-LSL)/(3σ) = (Average of Averages - lsl) / (3 × Std.Dev.(σ))</li>
                                                 <li><strong>Actual Cpk:</strong> MIN(Cpk U, Cpk L)</li>
                                             </ul>
                                         </div>
@@ -553,6 +596,33 @@
                                     </div>
                                 </div>
                             </div>
+                        </page>
+                        <page string="Control Limits and Interval and Frequency" name="control_limits_per_group" attrs="{'invisible': ['|', ('stage', 'in', ('draft', 'completed')), ('statistics_calculated', '=', False)]}">
+                                <field name="control_limits_lines" readonly="1">
+                                    <tree create="0" delete="0">
+                                        <field name="group_id"/>
+                                        <field name="ucl_x"/>
+                                        <field name="lcl_x"/>
+                                        <field name="avg_of_avgs"/>
+                                        <field name="avg_value"/>
+                                        <field name="ucl_r"/>
+                                        <field name="lcl_r"/>
+                                        <field name="avg_range"/>
+                                        <field name="range_value"/>
+                                    </tree>
+                                </field>
+                                <br/>
+                                <div style="font-weight: bold; text-align: center; border: 1px solid lightblue; padding: 5px; background-color: #F0FFF0;">
+                                    <button name="action_update_interval_frequency_display" type="object" string="Update Interval and Frequency Display" />
+                                </div>
+                                <br/>
+                                <field name="interval_frequency_display_ids" readonly="1">
+                                    <tree>
+                                        <field name="interval1"/>
+                                        <field name="interval2"/>
+                                        <field name="frequency"/>
+                                    </tree>
+                                </field>
                         </page>
                     </notebook>
                 </sheet>

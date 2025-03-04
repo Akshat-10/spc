@@ -1,7 +1,7 @@
 from odoo import models, fields, api, _, tools
 from odoo.exceptions import UserError, ValidationError
 from datetime import timedelta
-
+import math
 
 
 ########################################################################################################
@@ -105,28 +105,28 @@ class SpcMeasurementValue(models.Model):
         ('unique_parameter_group', 'unique(parameter_id, group_id)', 'A parameter can only have one value per group!')
     ]
     
-    @api.model
-    def create(self, vals):
-        """Trigger statistics calculation when a new value is created."""
-        record = super(SpcMeasurementValue, self).create(vals)
-        if record.spc_id:
-            record.spc_id.action_calculate_statistics()
-        return record
+    # @api.model
+    # def create(self, vals):
+    #     """Trigger statistics calculation when a new value is created."""
+    #     record = super(SpcMeasurementValue, self).create(vals)
+    #     if record.spc_id:
+    #         record.spc_id.action_calculate_statistics()
+    #     return record
 
-    def write(self, vals):
-        """Trigger statistics calculation when an existing value is updated."""
-        result = super(SpcMeasurementValue, self).write(vals)
-        if 'value' in vals:  # Only trigger if 'value' field is modified
-            for record in self:
-                if record.spc_id:
-                    record.spc_id.action_calculate_statistics()
-        return result
+    # def write(self, vals):
+    #     """Trigger statistics calculation when an existing value is updated."""
+    #     result = super(SpcMeasurementValue, self).write(vals)
+    #     if 'value' in vals:  # Only trigger if 'value' field is modified
+    #         for record in self:
+    #             if record.spc_id:
+    #                 record.spc_id.action_calculate_statistics()
+    #     return result
 
-    @api.onchange('value')
-    def _onchange_value_trigger_statistics(self):
-        """Triggers statistics calculation when the value field is changed"""
-        if self.spc_id:
-            self.spc_id.action_calculate_statistics()
+    # @api.onchange('value')
+    # def _onchange_value_trigger_statistics(self):
+    #     """Triggers statistics calculation when the value field is changed"""
+    #     if self.spc_id:
+    #         self.spc_id.action_calculate_statistics()
     
 class SpcGroupStatistics(models.Model):
     _name = 'spc.group.statistics'
@@ -220,6 +220,33 @@ class SpcFrequency(models.Model):
             
             record.current_frequency = total
 
+
+
+class SpcControlLimitsLine(models.Model):
+    _name = 'spc.control.limits.line'
+    _description = 'SPC Control Limits Line'
+
+    spc_id = fields.Many2one(
+        'statistical.process.control',
+        string='SPC',
+        ondelete='cascade',
+    )
+    group_id = fields.Many2one(
+        'spc.measurement.group',
+        string='Group',
+    )
+    
+    ucl_x = fields.Float(string='U.C.L. X', digits=(16, 4))
+    lcl_x = fields.Float(string='L.C.L. X', digits=(16, 4))
+    ucl_r = fields.Float(string='U.C.L. R', digits=(16, 4))
+    lcl_r = fields.Float(string='L.C.L. R', digits=(16, 4))
+    avg_range = fields.Float(string='R-BAR', digits=(16, 4))
+    avg_of_avgs = fields.Float(string='X-BAR', digits=(16, 4))
+    range_value = fields.Float(string='Range', digits=(16, 4))
+    avg_value = fields.Float(string='Avg', digits=(16, 4))
+    
+    
+    
 ########################################################################################################
 ################################ Main Statistical Process Control model ################################
 ########################################################################################################
@@ -234,7 +261,7 @@ class StatisticalProcessControl(models.Model):
     name = fields.Char(string='Name', required=True, copy=False, readonly=True, index=True, default=lambda self: _('New'), store=True)
     date = fields.Date(string='Date', required=True, default=fields.Date.today, store=True)
     product_id = fields.Many2one('product.product', string='Product', store=True)
-    product_qty = fields.Float(string='Product Quantity', required=True, store=True)
+    product_qty = fields.Float(string='Product Quantity', store=True)
     
     part_no_id = fields.Many2one('spc.part', string='Part No', store=True)
     part_name = fields.Char(string='Part Name', related='part_no_id.part_name', store=True)
@@ -247,7 +274,7 @@ class StatisticalProcessControl(models.Model):
     data_collection = fields.Text(string='Data Collection', store=True)
     
     
-    least_count = fields.Float(string='Least Count', help="Measurement precision")
+    least_count = fields.Float(string='Least Count', help="Measurement precision", digits=(16, 3))
     
     sampling_ratio = fields.Integer(
         string='Sampling Ratio', 
@@ -258,9 +285,9 @@ class StatisticalProcessControl(models.Model):
     ### SAMPLING RATIO (ALL DIMENSIONS ARE IN MM)  ###
     #### Upper Specification Limit (USL) ####
     
-    usl = fields.Float(string='USL', store=True)
+    usl = fields.Float(string='USL', store=True, digits=(16, 4))
     #### Lower Specification Limit (LSL) ####
-    lsl = fields.Float(string='LSL', store=True)
+    lsl = fields.Float(string='LSL', store=True, digits=(16, 4))
     
     ###### MEASURED VALUE ########
     #### Parameters (X1, X2, etc.)
@@ -283,6 +310,8 @@ class StatisticalProcessControl(models.Model):
     avg_of_avgs = fields.Float(string='Average of Averages', compute='_compute_summary_statistics', store=True, digits=(16, 4))
     
     statistics_calculated = fields.Boolean(string='Statistics Calculated', default=False)
+    show_calculate_button = fields.Boolean(string='Show Calculate Button', default=False)
+    
     
     control_chart_constants_ids = fields.One2many(
         'spc.control.chart.constants', 
@@ -297,27 +326,27 @@ class StatisticalProcessControl(models.Model):
     
     
     process_width = fields.Float(string='Process Width (R)', compute='_compute_advanced_statistics', store=True,
-                               help="Difference between maximum and minimum values")
+                               help="Difference between maximum and minimum values", digits=(16, 4))
     design_centre = fields.Float(string='Design Centre (D)', compute='_compute_advanced_statistics', store=True,
-                               help="Average of USL and LSL")
+                               help="Average of USL and LSL", digits=(16, 4))
     starting_point = fields.Float(string='Starting Point', compute='_compute_advanced_statistics', store=True,
-                                help="Minimum value from all measurements")
+                                help="Minimum value from all measurements", digits=(16, 4))
     specification_width = fields.Float(string='Specification Width (S)', compute='_compute_advanced_statistics', store=True,
-                                     help="Difference between USL and LSL")
+                                     help="Difference between USL and LSL", digits=(16, 4))
     interval_c = fields.Float(string='Interval (C)', compute='_compute_advanced_statistics', store=True,
-                            help="(Process Width + Least Count) / k")
+                            help="(Process Width + Least Count) / k", digits=(16, 4))
     num_readings = fields.Integer(string='No. of Readings (N)', compute='_compute_advanced_statistics', store=True,
                                 help="Count of measurement values")
     num_class_intervals = fields.Float(string='No. of Class Intervals', compute='_compute_advanced_statistics', store=True,
-                                     help="1 + 3.222 × log10(N)")
+                                     help="1 + 3.222 × log10(N)", digits=(16, 3))
     selected_classes_k = fields.Char(string='Selecting no. of Classes (k)', compute='_compute_advanced_statistics', store=True,
                                    help="Selected number of classes based on sample size")
     index_k = fields.Float(string='Index (K)', compute='_compute_advanced_statistics', store=True,
-                         help="R × (D-R) / S")
+                         help="R × (D-R) / S", digits=(16, 3))
     shift_x_from_d = fields.Float(string='Shift Of X from D', compute='_compute_advanced_statistics', store=True,
-                                help="Difference between average and design center")
+                                help="Difference between average and design center", digits=(16, 4))
     lower_class_limit = fields.Float(string='Lower Class Limit', compute='_compute_advanced_statistics', store=True,
-                                   help="Starting Point - (0.5 × Least Count)")
+                                   help="Starting Point - (0.5 × Least Count)", digits=(16, 4))
     
     
     interval_ids = fields.One2many('spc.interval', 'spc_id', string='Intervals')
@@ -325,15 +354,15 @@ class StatisticalProcessControl(models.Model):
     
     # Control Limits and Process Capability Fields
     ucl_x = fields.Float(string='U.C.L.X', compute='_compute_control_limits', store=True,
-                       help="Upper Control Limit for X = X̄ + A2×R̄")
+                       help="Upper Control Limit for X = X̄ + A2×R̄", digits=(16, 4))
     lcl_x = fields.Float(string='L.C.L.X', compute='_compute_control_limits', store=True,
-                       help="Lower Control Limit for X = X̄ - A2×R̄")
+                       help="Lower Control Limit for X = X̄ - A2×R̄", digits=(16, 4))
     ucl_r = fields.Float(string='U.C.L.R', compute='_compute_control_limits', store=True,
-                       help="Upper Control Limit for R = R̄ × D4")
+                       help="Upper Control Limit for R = R̄ × D4", digits=(16, 4))
     lcl_r = fields.Float(string='L.C.L.R', compute='_compute_control_limits', store=True,
-                       help="Lower Control Limit for R = R̄ × D3")
+                       help="Lower Control Limit for R = R̄ × D3", digits=(16, 4))
     std_dev = fields.Float(string='Std.Dev.(σ)', compute='_compute_control_limits', store=True,
-                         help="Standard Deviation = R̄ / d2")
+                         help="Standard Deviation = R̄ / d2", digits=(16, 4))
     cp = fields.Float(string='Cp', compute='_compute_process_capability', store=True,
                     help="Process Capability = (USL-LSL)/(6σ)")
     cpk_u = fields.Float(string='Cpk U', compute='_compute_process_capability', store=True,
@@ -342,6 +371,14 @@ class StatisticalProcessControl(models.Model):
                        help="Lower Process Capability = (X̄-LSL)/(3σ)")
     cpk = fields.Float(string='Actual Cpk', compute='_compute_process_capability', store=True,
                      help="Actual Process Capability = MIN(Cpk U, Cpk L)")
+    
+    
+    
+    control_limits_lines = fields.One2many(
+        'spc.control.limits.line',
+        'spc_id',
+        string='Control Limits Lines'
+    )
     
     
     @api.model
@@ -510,25 +547,19 @@ class StatisticalProcessControl(models.Model):
             elif num_values == 1000:
                 record.selected_classes_k = "10"
             else:
-                record.selected_classes_k = "Calculate manually based on data size"
-            
+                record.selected_classes_k = "Calculate manually based on data sample"
+                record.show_calculate_button = True
+                
             # Calculate k for interval
             k_value = 0
             if record.selected_classes_k and record.selected_classes_k.isdigit():
                 k_value = float(record.selected_classes_k)
-                print("K value --------------", k_value)
-                print(" selected_classes_k --------------", record.selected_classes_k)
-            
-            print("K value 2 $$$$ --------------", k_value)
-            
+                        
             # Interval (C)
             if k_value > 0:
                 record.interval_c = (record.process_width + record.least_count) / k_value
             else:
-                record.interval_c = 0
-                
-            print("Interval C --------------", record.interval_c)
-            
+                record.interval_c = 0            
             
             # Index (K)
             if record.specification_width:
@@ -615,11 +646,202 @@ class StatisticalProcessControl(models.Model):
             record._compute_control_limits()
             record._compute_process_capability()
         
+        
+        
+    # def action_calculate_statistics(self):
+        # """Action to calculate statistics"""
+        # """
+        # Calculate statistics and update control_limits_lines without deleting existing lines.
+        # """
+        # self._compute_group_statistics()
+        
+        
+        # # self._compute_group_statistics()
+        # # self._compute_summary_statistics()
+        # # self._compute_control_limits()
+        # # Get the groups from measurement_group_ids
+        # groups = self.measurement_group_ids
+        # if not groups:
+        #     self.statistics_calculated = True  # Mark as calculated if no groups
+        #     return True
+
+        # # Store control limit values (e.g., from the parent record)
+        # limit_values = {
+        #     'ucl_x': self.ucl_x,
+        #     'lcl_x': self.lcl_x,
+        #     'ucl_r': self.ucl_r,
+        #     'lcl_r': self.lcl_r,
+        #     'avg_range': self.avg_range,
+        #     'avg_of_avgs': self.avg_of_avgs
+        # }
+
+        # # Process each group
+        # for group in groups:
+        #     # Get range and average values for this group (assuming group_stat_ids exists)
+        #     range_stat = self.group_stat_ids.filtered(
+        #         lambda s: s.group_id == group and s.stat_type == 'range'
+        #     )
+        #     avg_stat = self.group_stat_ids.filtered(
+        #         lambda s: s.group_id == group and s.stat_type == 'avg'
+        #     )
+        #     range_value = range_stat.value if range_stat else 0.0
+        #     avg_value = avg_stat.value if avg_stat else 0.0
+
+        #     # Check if a line already exists for this group in control_limits_lines
+        #     existing_line = self.control_limits_lines.filtered(lambda l: l.group_id == group)
+
+        #     if existing_line:
+        #         # Update the existing line with new values
+        #         existing_line.write({
+        #             'range_value': range_value,
+        #             'avg_value': avg_value,
+        #             'ucl_x': limit_values['ucl_x'],
+        #             'lcl_x': limit_values['lcl_x'],
+        #             'ucl_r': limit_values['ucl_r'],
+        #             'lcl_r': limit_values['lcl_r'],
+        #             'avg_range': limit_values['avg_range'],
+        #             'avg_of_avgs': limit_values['avg_of_avgs'],
+        #         })
+        #     else:
+        #         # Create a new line if none exists for this group
+        #         self.env['spc.control.limits.line'].create({
+        #             'spc_id': self.id,
+        #             'group_id': group.id,
+        #             'range_value': range_value,
+        #             'avg_value': avg_value,
+        #             'ucl_x': limit_values['ucl_x'],
+        #             'lcl_x': limit_values['lcl_x'],
+        #             'ucl_r': limit_values['ucl_r'],
+        #             'lcl_r': limit_values['lcl_r'],
+        #             'avg_range': limit_values['avg_range'],
+        #             'avg_of_avgs': limit_values['avg_of_avgs'],
+        #         })
+                
+        # self.statistics_calculated = True
+        # return True
+
+
+    @api.onchange('measurement_group_ids')
+    def _onchange_measurement_group_ids(self):
+        if self.measurement_group_ids:
+            # self.statistics_calculated = False  # Mark as not calculated when groups change
+            self.control_limits_lines = False  # Clear control limits lines when groups change
+            # self._generate_measurement_values()  # Generate measurement values for new groups
+            self.action_calculate_statistics()  # Recalculate statistics when groups change
+
+
     def action_calculate_statistics(self):
         """Action to calculate statistics"""
         self._compute_group_statistics()
+        
+        # Get the groups from measurement_group_ids
+        groups = self.measurement_group_ids
+        existing_group_ids = groups.ids  # Get IDs of existing groups
+
+        # Delete control limits lines for groups that no longer exist
+        # Also delete lines that don't have any group_id
+        orphaned_lines = self.control_limits_lines.filtered(
+            lambda line: not line.group_id or line.group_id.id not in existing_group_ids
+        )
+        orphaned_lines.unlink()  # Remove lines for deleted groups or lines without group_id
+
+        if not groups:
+            self.statistics_calculated = True  # Mark as calculated if no groups
+            return True
+
+        # Store control limit values (e.g., from the parent record)
+        limit_values = {
+            'ucl_x': self.ucl_x,
+            'lcl_x': self.lcl_x,
+            'ucl_r': self.ucl_r,
+            'lcl_r': self.lcl_r,
+            'avg_range': self.avg_range,
+            'avg_of_avgs': self.avg_of_avgs
+        }
+
+        # Process each group
+        for group in groups:
+            # Get range and average values for this group (assuming group_stat_ids exists)
+            range_stat = self.group_stat_ids.filtered(
+                lambda s: s.group_id == group and s.stat_type == 'range'
+            )
+            avg_stat = self.group_stat_ids.filtered(
+                lambda s: s.group_id == group and s.stat_type == 'avg'
+            )
+            range_value = range_stat.value if range_stat else 0.0
+            avg_value = avg_stat.value if avg_stat else 0.0
+
+            # Check if a line already exists for this group in control_limits_lines
+            existing_line = self.control_limits_lines.filtered(lambda l: l.group_id == group)
+
+            if existing_line:
+                # Update the existing line with new values
+                existing_line.write({
+                    'range_value': range_value,
+                    'avg_value': avg_value,
+                    'ucl_x': limit_values['ucl_x'],
+                    'lcl_x': limit_values['lcl_x'],
+                    'ucl_r': limit_values['ucl_r'],
+                    'lcl_r': limit_values['lcl_r'],
+                    'avg_range': limit_values['avg_range'],
+                    'avg_of_avgs': limit_values['avg_of_avgs'],
+                })
+            else:
+                # Create a new line if none exists for this group
+                self.env['spc.control.limits.line'].create({
+                    'spc_id': self.id,
+                    'group_id': group.id,
+                    'range_value': range_value,
+                    'avg_value': avg_value,
+                    'ucl_x': limit_values['ucl_x'],
+                    'lcl_x': limit_values['lcl_x'],
+                    'ucl_r': limit_values['ucl_r'],
+                    'lcl_r': limit_values['lcl_r'],
+                    'avg_range': limit_values['avg_range'],
+                    'avg_of_avgs': limit_values['avg_of_avgs'],
+                })
+                
         self.statistics_calculated = True
         return True
+
+    def action_calculate_interval_c(self):
+        """Calculate Interval (C) manually based on current values and recommended k."""
+            
+        for record in self:
+            k_value = 0
+            if record.selected_classes_k and record.selected_classes_k.isdigit():
+                k_value = float(record.selected_classes_k)
+                
+            if k_value > 0:
+                # Calculate recommended k using Sturges' formula: 1 + 3.222 * log10(N)
+                record.interval_c = (record.process_width + record.least_count) / k_value
+                record.show_calculate_button = False
+            else:
+                record.interval_c = "0"
+                
+            # if record.selected_classes_k and record.selected_classes_k.isdigit():
+            #     k_value = float(record.selected_classes_k)
+                        
+            # # Interval (C)
+            # if k_value > 0:
+            #     record.interval_c = (record.process_width + record.least_count) / k_value
+            # else:
+            #     record.interval_c = 0            
+    
+    
+    @api.model
+    def write(self, vals):
+        """
+        Override write to recalculate statistics when measurement_value_ids is updated.
+        """
+        # Call the parent write method to save the changes
+        res = super(StatisticalProcessControl, self).write(vals)
+
+        # Check if measurement_value_ids was updated
+        if 'measurement_value_ids' in vals:
+            self.action_calculate_statistics()
+
+        return res
     
     @api.constrains('usl', 'lsl')
     def _check_spec_limits(self):

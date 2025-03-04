@@ -33,6 +33,9 @@ access_statistical_process_control_manager,statistical.process.control manager,m
 access_statistical_process_control_user,statistical.process.control user,model_statistical_process_control,group_spc_user,1,1,0,0
 access_statistical_process_control_viewer,statistical.process.control viewer,model_statistical_process_control,group_spc_viewer,1,0,0,0
 
+access_spc_approval_line_manager,spc.approval.line manager,model_spc_approval_line,group_spc_manager,1,1,1,1
+access_spc_approval_line_user,spc.approval.line user,model_spc_approval_line,group_spc_user,1,1,1,1
+access_spc_approval_line_viewer,spc.approval.line viewer,model_spc_approval_line,group_spc_viewer,1,0,0,0
 
 
 access_spc_group_statistics_manager,spc.group.statistics manager,model_spc_group_statistics,group_spc_manager,1,1,1,1
@@ -54,4 +57,15 @@ access_spc_interval_viewer,spc.interval viewer,model_spc_interval,group_spc_view
 access_spc_frequency_manager,spc.frequency manager,model_spc_frequency,group_spc_manager,1,1,1,1
 access_spc_frequency_user,spc.frequency user,model_spc_frequency,group_spc_user,1,1,1,1
 access_spc_frequency_viewer,spc.frequency viewer,model_spc_frequency,group_spc_viewer,1,0,0,0
+
+
+access_spc_control_limits_line_manager,spc.control.limits.line manager,model_spc_control_limits_line,group_spc_manager,1,1,1,1
+access_spc_control_limits_line_user,spc.control.limits.line user,model_spc_control_limits_line,group_spc_user,1,1,1,1
+access_spc_control_limits_line_viewer,spc.control.limits.line viewer,model_spc_control_limits_line,group_spc_viewer,1,0,0,0
+
+
+
+access_spc_interval_frequency_display_manager,spc.interval frequency display manager,model_spc_interval_frequency_display,group_spc_manager,1,1,1,1
+access_spc_interval_frequency_display_user,spc.interval frequency display user,model_spc_interval_frequency_display,group_spc_user,1,1,1,1
+access_spc_interval_frequency_display_viewer,spc.interval frequency display viewer,model_spc_interval_frequency_display,group_spc_viewer,1,0,0,0
 
