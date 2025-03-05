@@ -271,7 +271,7 @@
                 <header>
                     <field name="stage" widget="statusbar" statusbar_visible="draft,in_progress,to_approve,approved,completed" statusbar_colors='{"canceled": "warning" , "draft": #199cff , "in_progress": "info", "to_approve":"warning", "approved":"green", "completed":"green"}' options="{'clickable': False}"/>
                     <button name="action_start" string="Start" type="object" class="btn-primary" attrs="{'invisible': [('stage', '!=', 'draft')]}" confirm="Are you sure you want to start the process?" />
-                    <button name="action_send_for_approval" string="Send for Approval" type="object" class="btn-primary" attrs="{'invisible': [('stage', '!=', 'in_progress')]}" confirm="Send for approval?" />
+                    <button name="action_send_for_approval" string="Send for Approval" type="object" class="btn-info" attrs="{'invisible': [('stage', '!=', 'in_progress')]}" confirm="Send for approval?" />
                     <button name="action_approve" string="Approve" type="object" class="btn-success" attrs="{'invisible': ['|', ('stage', '!=', 'to_approve'), ('can_approve', '=', False)]}" confirm="Approve your part?" />
                     <button name="action_reject" string="Reject" type="object" class="btn-danger" attrs="{'invisible': ['|', ('stage', '!=', 'to_approve'), ('can_approve', '=', False)]}" confirm="Reject and return to In Progress?" />
                     <button name="action_complete" string="Complete" type="object" class="btn-primary"
@@ -331,14 +331,12 @@
                     </group>
                     <notebook>
                         <page name="approval_status" string="Approval Status" groups="spc.group_spc_approver" attrs="{'invisible': [('stage', '!=', 'to_approve')]}" >
-                            <group string="Approval Status">
-                                <field name="approval_line_ids" readonly="1">
-                                    <tree>
-                                        <field name="user_id"/>
-                                        <field name="state" readonly="1"/>
-                                    </tree>
-                                </field>
-                            </group>
+                            <field name="approval_line_ids" readonly="1">
+                                <tree>
+                                    <field name="user_id"/>
+                                    <field name="state"/>
+                                </tree>
+                            </field>
                         </page>
                         <page string="Measurement Parameters" name="measurement_parameter">
                             <p class="oe_grey">First, define your measurement parameters (X1, X2, X3, etc.)</p>
