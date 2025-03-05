@@ -1,6 +1,8 @@
 from odoo import models, fields, api, _, tools
 from odoo.exceptions import UserError, ValidationError
 from datetime import timedelta
+import logging
+_logger = logging.getLogger(__name__)
 
 
 
@@ -26,51 +28,108 @@ class StatisticalProcessControl(models.Model):
     approval_line_ids = fields.One2many('spc.approval.line', 'spc_id', string='Approval Lines')
     can_approve = fields.Boolean(compute='_compute_can_approve', string='Can Approve')
     
+    stage_display = fields.Char(
+        string="Stage Display",
+        compute="_compute_stage_display",
+        store=False,
+    )
+    
+    def _compute_stage_display(self):
+        for record in self:
+            selection = record._fields['stage'].selection
+            if callable(selection):
+                selection = selection(record)
+            
+            # Handle selection safely to avoid type errors
+            selection_dict = {}
+            if selection:
+                for key, value in selection:
+                    selection_dict[key] = value
+                    
+            if record.stage in selection_dict:
+                record.stage_display = selection_dict[record.stage]
+            else:
+                record.stage_display = ''
+
+
     @api.depends('manager')
     def _compute_is_manager(self):
         for record in self:
             record.is_manager = record.manager == self.env.user
-            
-            
-    # def _send_action_email(self, action_name):
-    #     template = self.env.ref('spc.mail_template_spc_action')
-    #     if template:
-    #         # Send email to the manager
-    #         template.with_context(action_name=action_name).send_mail(
-    #             self.id, force_send=True, email_values={'email_to': self.manager.email}
-    #         )
-            
-    #         # Send email to approval members
-    #         for member in self.approval_members:
-    #             template.with_context(action_name=action_name).send_mail(
-    #                 self.id, force_send=True, email_values={'email_to': member.email}
-    #             )
-            
-    #         # Send email to users in group_spc_approver (excluding duplicates)
-    #         group_spc_approver = self.env.ref('spc.group_spc_approver')
-    #         for user in group_spc_approver.users:
-    #             if user != self.manager and user not in self.approval_members:
-    #                 template.with_context(action_name=action_name).send_mail(
-    #                     self.id, force_send=True, email_values={'email_to': user.email}
-    #                 )
 
-    # def _send_action_email(self, template_id):
-    #     """Send an email using the specified template to manager, approval members, and group_spc_approver users."""
-    #     template = self.env.ref(template_id)
-    #     if template:
-    #         # Collect unique recipients
-    #         recipients = self.manager | self.approval_members
-    #         group_spc_approver = self.env.ref('spc.group_spc_approver')
-    #         recipients |= group_spc_approver.users
-    #         # Send email to each recipient with their name in the context
-    #         for recipient in recipients:
-    #             if recipient.email:
-    #                 template.with_context(recipient_name=recipient.name).send_mail(
-    #                     self.id,
-    #                     force_send=True,
-    #                     email_values={'email_to': recipient.email}
-    #                 )
-                    
+
+    def _send_action_email(self, action_name):
+        template = self.env.ref('spc.mail_template_spc_action')
+        if template:
+            # Send email to the manager
+            template.with_context(action_name=action_name).send_mail(
+                self.id, force_send=True, email_values={'email_to': self.manager.email}
+            )
+            
+            # Send email to approval members
+            for member in self.approval_members:
+                template.with_context(action_name=action_name).send_mail(
+                    self.id, force_send=True, email_values={'email_to': member.email}
+                )
+            
+            # Send email to users in group_spc_approver (excluding duplicates)
+            group_spc_approver = self.env.ref('spc.group_spc_approver')
+            for user in group_spc_approver.users:
+                if user != self.manager and user not in self.approval_members:
+                    template.with_context(action_name=action_name).send_mail(
+                        self.id, force_send=True, email_values={'email_to': user.email}
+                    )
+    
+    
+
+    def _send_template_email(self, template_id):
+        """Send an email using the specified template to manager, approval members, and group_spc_approver users."""
+        self.ensure_one()  # Ensure we’re working with a single record
+        template = self.env.ref(template_id, raise_if_not_found=False)
+        if not template:
+            _logger.warning(f"Email template {template_id} not found.")
+            return
+
+        # Collect unique recipients: manager, approval members, and group_spc_approver users
+        recipients = set()
+        
+        # Add manager if present and has an email
+        if self.manager and self.manager.email:
+            recipients.add(self.manager)
+        
+        # Add approval members if they have emails
+        if self.approval_members:
+            recipients.update(user for user in self.approval_members if user.email)
+        
+        # Add users from group_spc_approver
+        group_spc_approver = self.env.ref('spc.group_spc_approver', raise_if_not_found=False)
+        if group_spc_approver:
+            recipients.update(user for user in group_spc_approver.users if user.email)
+
+        # Send email to each unique recipient
+        for recipient in recipients:
+            try:
+                # Cast the template to a mail.template record to access the send_mail method
+                mail_template = self.env['mail.template'].browse(template.id)
+                mail_template.with_context(recipient_name=recipient.name).send_mail(
+                    self.id,
+                    force_send=True,
+                    email_values={
+                        'email_to': recipient.email,
+                        'recipient_ids': [(4, recipient.partner_id.id)],  # Link to partner for tracking
+                    }
+                )
+                # template.with_context(recipient_name=recipient.name).send_mail(
+                #     self.id,
+                #     force_send=True,
+                #     email_values={
+                #         'email_to': recipient.email,
+                #         'recipient_ids': [(4, recipient.partner_id.id)],  # Link to partner for tracking
+                #     }
+                # )
+            except Exception as e:
+                _logger.error(f"Failed to send email to {recipient.email} for SPC {self.name}: {str(e)}")
+
     @api.depends('approval_line_ids', 'approval_line_ids.state', 'stage')
     def _compute_can_approve(self):
         """Determine if the current user can approve the document."""
@@ -97,6 +156,7 @@ class StatisticalProcessControl(models.Model):
         if self.stage == 'draft':
             self.write({'stage': 'in_progress'})
             # self._send_action_email('Start')
+            self._send_template_email('spc.mail_template_spc_start')
         return True
 
     def action_send_for_approval(self):
@@ -118,19 +178,10 @@ class StatisticalProcessControl(models.Model):
             self.env['spc.approval.line'].create(approval_lines)
             self.write({'stage': 'to_approve'})
             # self._send_action_email('Send for Approval')
+            self._send_template_email('spc.mail_template_spc_send_for_approval')
         return True
 
-    # def action_approve(self):
-    #     """Approval member approves their line; move to 'approved' if all approve."""
-    #     self.ensure_one()
-    #     if self.stage == 'to_approve':
-    #         approval_line = self.approval_line_ids.filtered(
-    #             lambda l: l.user_id == self.env.user and l.state == 'pending'
-    #         )
-    #         if approval_line:
-    #             approval_line.write({'state': 'approved'})
-    #             self.check_approval_status()
-    #     return True
+
     
     def action_approve(self):
         """Approval member approves their line; move to 'approved' if all approve.
@@ -151,6 +202,7 @@ class StatisticalProcessControl(models.Model):
                 # Optionally update all approval lines to 'approved'
                 self.approval_line_ids.write({'state': 'approved'})
                 # self._send_action_email('Approve')
+                self._send_template_email('spc.mail_template_spc_approve')
             else:
                 # Existing logic for regular users
                 approval_line = self.approval_line_ids.filtered(
@@ -160,19 +212,10 @@ class StatisticalProcessControl(models.Model):
                     approval_line.write({'state': 'approved'})
                     self.check_approval_status()
                     # self._send_action_email('Approve')
+                    self._send_template_email('spc.mail_template_spc_approve')
         return True
 
-    # def action_reject(self):
-    #     """Approval member rejects their line; move back to 'in_progress'."""
-    #     self.ensure_one()
-    #     if self.stage == 'to_approve':
-    #         approval_line = self.approval_line_ids.filtered(
-    #             lambda l: l.user_id == self.env.user and l.state == 'pending'
-    #         )
-    #         if approval_line:
-    #             approval_line.write({'state': 'rejected'})
-    #             self.check_approval_status()
-    #     return True
+   
     
     def action_reject(self):
         """Approval member rejects their line; move back to 'in_progress'.
@@ -192,6 +235,7 @@ class StatisticalProcessControl(models.Model):
                 self.approval_line_ids.unlink()  # Clear existing approval lines
                 self.write({'stage': 'in_progress'})
                 # self._send_action_email('Reject')
+                self._send_template_email('spc.mail_template_spc_reject')
             else:
                 # Existing logic for regular users
                 approval_line = self.approval_line_ids.filtered(
@@ -201,15 +245,8 @@ class StatisticalProcessControl(models.Model):
                     approval_line.write({'state': 'rejected'})
                     self.check_approval_status()
                     # self._send_action_email('Reject')
+                    self._send_template_email('spc.mail_template_spc_reject')
         return True
-
-    def check_approval_status(self):
-        """Check approval lines and update stage accordingly."""
-        self.ensure_one()
-        if all(line.state == 'approved' for line in self.approval_line_ids):
-            self.write({'stage': 'approved'})
-        elif any(line.state == 'rejected' for line in self.approval_line_ids):
-            self.write({'stage': 'in_progress'})
 
     def action_complete(self):
         """Move from 'approved' to 'completed' if the user is in group_spc_approver."""
@@ -221,16 +258,8 @@ class StatisticalProcessControl(models.Model):
             raise UserError(_('The document must be in the Approved stage to be completed.'))
         self.write({'stage': 'completed'})
         # self._send_action_email('Complete')
+        self._send_template_email('spc.mail_template_spc_complete')
         return True
-
-    # def action_complete(self):
-    #     """Manager moves from 'approved' to 'completed'."""
-    #     self.ensure_one()
-    #     if self.env.user != self.manager:
-    #         raise UserError(_('Only the manager can complete this document.'))
-    #     if self.stage == 'approved':
-    #         self.write({'stage': 'completed'})
-    #     return True
 
 
     def action_cancel(self):
@@ -241,6 +270,7 @@ class StatisticalProcessControl(models.Model):
         if self.stage not in ('completed', 'canceled'):
             self.write({'stage': 'canceled'})
             # self._send_action_email('Cancel')
+            self._send_template_email('spc.mail_template_spc_cancel')
         return True
 
     def action_undo(self):
@@ -251,6 +281,29 @@ class StatisticalProcessControl(models.Model):
         else:
             raise UserError(_("Cannot undo from the current state."))
         return True
+    
+    
+    def check_approval_status(self):
+        """Check the approval status and update the stage accordingly."""
+        self.ensure_one()
+        if self.stage == 'to_approve':
+            approved = all(line.state == 'approved' for line in self.approval_line_ids)
+            rejected = any(line.state == 'rejected' for line in self.approval_line_ids)
+            if approved:
+                self.write({'stage': 'approved'})
+            elif rejected:
+                self.approval_line_ids.unlink()
+                self.write({'stage': 'in_progress'})
+        return True
+    
+    # def check_approval_status(self):
+    #     """Check approval lines and update stage accordingly."""
+    #     self.ensure_one()
+    #     if all(line.state == 'approved' for line in self.approval_line_ids):
+    #         self.write({'stage': 'approved'})
+    #     elif any(line.state == 'rejected' for line in self.approval_line_ids):
+    #         self.write({'stage': 'in_progress'})
+
 
     def _generate_measurement_values(self):
         """
@@ -308,3 +361,60 @@ class SpcApprovalLine(models.Model):
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
     ], string='State', default='pending', required=True)
+    
+    
+    
+    
+     # def action_reject(self):
+    #     """Approval member rejects their line; move back to 'in_progress'."""
+    #     self.ensure_one()
+    #     if self.stage == 'to_approve':
+    #         approval_line = self.approval_line_ids.filtered(
+    #             lambda l: l.user_id == self.env.user and l.state == 'pending'
+    #         )
+    #         if approval_line:
+    #             approval_line.write({'state': 'rejected'})
+    #             self.check_approval_status()
+    #     return True
+    
+    
+    # def action_complete(self):
+    #     """Manager moves from 'approved' to 'completed'."""
+    #     self.ensure_one()
+    #     if self.env.user != self.manager:
+    #         raise UserError(_('Only the manager can complete this document.'))
+    #     if self.stage == 'approved':
+    #         self.write({'stage': 'completed'})
+    #     return True
+
+
+
+    # def action_approve(self):
+    #     """Approval member approves their line; move to 'approved' if all approve."""
+    #     self.ensure_one()
+    #     if self.stage == 'to_approve':
+    #         approval_line = self.approval_line_ids.filtered(
+    #             lambda l: l.user_id == self.env.user and l.state == 'pending'
+    #         )
+    #         if approval_line:
+    #             approval_line.write({'state': 'approved'})
+    #             self.check_approval_status()
+    #     return True
+    
+    
+    # def _send_action_email(self, template_id):
+    #     """Send an email using the specified template to manager, approval members, and group_spc_approver users."""
+    #     template = self.env.ref(template_id)
+    #     if template:
+    #         # Collect unique recipients
+    #         recipients = self.manager | self.approval_members
+    #         group_spc_approver = self.env.ref('spc.group_spc_approver')
+    #         recipients |= group_spc_approver.users
+    #         # Send email to each recipient with their name in the context
+    #         for recipient in recipients:
+    #             if recipient.email:
+    #                 template.with_context(recipient_name=recipient.name).send_mail(
+    #                     self.id,
+    #                     force_send=True,
+    #                     email_values={'email_to': recipient.email}
+    #                 )
